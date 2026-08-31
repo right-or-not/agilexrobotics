@@ -28,6 +28,16 @@ if [[ ! -e "/sys/class/net/$interface" ]]; then
     exit 1
 fi
 
+# Reuse an interface that is already up at the requested bitrate.  This keeps
+# repeated launcher runs idempotent and avoids an unnecessary sudo prompt.
+current_details="$(ip -details link show "$interface")"
+if grep -q 'state UP' <<<"$current_details" \
+    && grep -Eq "bitrate[[:space:]]+$bitrate([[:space:]]|$)" <<<"$current_details"; then
+    echo "$interface 已处于 UP 状态，波特率为 $bitrate bit/s；无需重新配置。"
+    ip -details -statistics link show "$interface"
+    exit 0
+fi
+
 if (( EUID == 0 )); then
     privileged=()
 elif command -v sudo >/dev/null 2>&1; then
