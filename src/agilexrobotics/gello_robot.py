@@ -44,6 +44,7 @@ class GelloPiperXRobot:
         firmware: Any = "default",
         configure_motion_limits: bool = True,
         startup_wait: float = 1.0,
+        control_hz: float = 50.0,
         max_command_delta_rad: float = 1.0,
         gripper_max_width_m: float = 0.1,
         gripper_force_n: float = 1.0,
@@ -51,6 +52,8 @@ class GelloPiperXRobot:
     ) -> None:
         if startup_wait < 0:
             raise ValueError("startup wait must be non-negative")
+        if not math.isfinite(control_hz) or control_hz <= 0:
+            raise ValueError("control hz must be a positive finite value")
         if not math.isfinite(gripper_max_width_m) or gripper_max_width_m <= 0:
             raise ValueError("gripper max width must be a positive finite value")
         if not math.isfinite(gripper_force_n) or gripper_force_n < 0:
@@ -63,6 +66,8 @@ class GelloPiperXRobot:
         )
         self._configure_motion_limits = configure_motion_limits
         self._startup_wait = startup_wait
+        self._command_interval = 1.0 / control_hz
+        self._last_command_time: float | None = None
         self._gripper_max_width_m = gripper_max_width_m
         self._gripper_force_n = gripper_force_n
         self._started = False
@@ -106,6 +111,7 @@ class GelloPiperXRobot:
         finally:
             self._driver.close()
             self._started = False
+            self._last_command_time = None
 
     def num_dofs(self) -> int:
         """返回六个机械臂关节加一个夹爪自由度。"""
@@ -130,6 +136,7 @@ class GelloPiperXRobot:
         if not np.all(np.isfinite(target)):
             raise ValueError("PiPER-X GELLO command must contain finite values")
         self._require_started()
+        self._wait_for_command_slot()
         # 第一帧客户端目标到达时才进入 JS 流式会话，避免服务端启动后
         # 在没有跟随目标的情况下长时间停留在 JS 模式。会话内只设置一次模式，
         # 后续帧直接使用 move_js 刷新六轴目标。
@@ -141,6 +148,17 @@ class GelloPiperXRobot:
         self._driver.command_gripper(width_m, self._gripper_force_n)
         # 命令成功后立即缓存目标；在下一帧真实反馈到达前保持观测连续。
         self._gripper_position = gripper
+
+    def _wait_for_command_slot(self) -> None:
+        """Limit JS command dispatch to the configured control frequency."""
+
+        now = time.monotonic()
+        if self._last_command_time is not None:
+            remaining = self._last_command_time + self._command_interval - now
+            if remaining > 0:
+                time.sleep(remaining)
+                now = time.monotonic()
+        self._last_command_time = now
 
     def get_observations(self) -> dict[str, np.ndarray]:
         state = self._get_state()

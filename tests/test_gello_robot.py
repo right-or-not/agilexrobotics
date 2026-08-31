@@ -92,6 +92,7 @@ def test_gello_server_hardware_confirmation_is_implicit() -> None:
 
     assert args.channel == "can0"
     assert args.port == 6001
+    assert args.hz == 50.0
     assert args.gripper_max_width_m == 0.1
     assert args.gripper_force_n == 1.0
     assert args.configure_motion_limits is True
@@ -158,6 +159,35 @@ def test_motion_limit_configuration_is_explicit(monkeypatch) -> None:
 
     assert driver.motion_limits_maximized is True
     assert robot.motion_limits_confirmed is True
+
+
+def test_control_hz_must_be_positive_and_finite() -> None:
+    driver = FakeDriver()
+
+    with pytest.raises(ValueError, match="control hz"):
+        GelloPiperXRobot(driver=driver, control_hz=0)
+    with pytest.raises(ValueError, match="control hz"):
+        GelloPiperXRobot(driver=driver, control_hz=float("nan"))
+
+
+def test_command_dispatch_is_rate_limited(monkeypatch) -> None:
+    times = iter((10.0, 10.005, 10.02))
+    sleeps: list[float] = []
+    monkeypatch.setattr(
+        "agilexrobotics.gello_robot.time.monotonic", lambda: next(times)
+    )
+    monkeypatch.setattr("agilexrobotics.gello_robot.time.sleep", sleeps.append)
+    driver = FakeDriver()
+    robot = GelloPiperXRobot(driver=driver, startup_wait=0, control_hz=50)
+    robot.start()
+    sleeps.clear()
+
+    target = np.array([0.0] * 6 + [0.5])
+    robot.command_joint_state(target)
+    robot.command_joint_state(target)
+
+    assert sleeps == pytest.approx([0.015])
+    assert len(driver.fast_commands) == 2
 
 
 def test_command_maps_seventh_axis_to_direct_gripper_width(monkeypatch) -> None:

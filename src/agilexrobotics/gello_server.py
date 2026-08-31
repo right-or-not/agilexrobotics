@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import math
 import pickle
 import signal
 from collections.abc import Sequence
@@ -35,6 +36,12 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--firmware", default="default")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=6001)
+    parser.add_argument(
+        "--hz",
+        type=float,
+        default=50.0,
+        help="maximum PiPER-X JS command dispatch frequency (default: 50)",
+    )
     parser.add_argument("--gripper-max-width-m", type=float, default=0.1)
     parser.add_argument("--gripper-force-n", type=float, default=1.0)
     parser.add_argument(
@@ -56,12 +63,15 @@ def _parser() -> argparse.ArgumentParser:
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = _parser().parse_args(argv)
+    if not math.isfinite(args.hz) or args.hz <= 0:
+        raise SystemExit("--hz must be a positive finite value")
 
     robot = GelloPiperXRobot(
         channel=args.channel,
         interface=args.interface,
         firmware=args.firmware,
         configure_motion_limits=args.configure_motion_limits,
+        control_hz=args.hz,
         gripper_max_width_m=args.gripper_max_width_m,
         gripper_force_n=args.gripper_force_n,
     )
@@ -86,7 +96,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         print(
             f"PiPER-X GELLO server listening on tcp://{args.host}:{args.port}; "
-            f"{limit_status}"
+            f"control limit {args.hz:g} Hz; {limit_status}"
         )
         while not stopping:
             try:
