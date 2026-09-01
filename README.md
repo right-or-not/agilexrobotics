@@ -125,7 +125,7 @@ uv run ag firmware
 uv run ag-gello-server --host 127.0.0.1 --port 6001 --hz 50
 ```
 
-`--hz` 限制 PiPER-X 关节命令的最大发送频率，默认值为 50 Hz。启动服务会进入硬件控制流程；完整的双终端连接步骤、参数含义和退出方式请参阅[开发与调试手册](docs/DEVELOPMENT.md#3-ag-gello-server-与-gello-跟随)。
+`--hz` 限制 PiPER-X 关节命令的最大发送频率，默认值为 50 Hz。启动服务会进入硬件控制流程；完整的双终端连接步骤、参数含义和退出方式请参阅[开发与调试手册](docs/DEVELOPMENT.md#4-ag-gello-server-与-gello-跟随)。
 
 ## （4）开发环境
 

@@ -4,18 +4,18 @@
 
 > 基于官方 `pyAgxArm` SDK，为 PiPER-X 提供 `ag` 命令行控制工具，以及连接 GELLO 主手与 PiPER-X 从臂的 ZMQ 跟随服务。
 
-## 0. 项目基本信息
+## （1）项目基本信息
 
 项目使用 Python 3.11 及以上版本，采用 `uv` 管理依赖和运行命令，并使用标准的 `src layout` 组织 Python 包。机械臂通信基于 `pyAgxArm` 和 SocketCAN；GELLO 跟随服务使用 NumPy 处理七维状态，并通过 ZeroMQ 在两个进程之间传输请求和反馈。
 
-### 命令入口
+### 1. 命令入口
 
 | 命令                       | Python 入口                          | 功能                                        |
 | ------------------------ | ---------------------------------- | ----------------------------------------- |
 | `uv run ag`              | `agilexrobotics.cli:main`          | 查询状态、配置参数，以及执行 PiPER-X 和 AGX 夹爪控制命令       |
 | `uv run ag-gello-server` | `agilexrobotics.gello_server:main` | 将 PiPER-X 封装为 GELLO 可访问的七自由度 ZMQ Robot 服务 |
 
-### 项目架构
+### 2. 项目架构
 
 项目按“入口与参数解析 → 协议适配 → 安全驱动 → 官方 SDK → 硬件”分层。三条主要调用链如下：
 
@@ -42,7 +42,7 @@ GELLO 主手 → piper_x_follow.py → ZMQ → gello_server.py
 | ZMQ 服务层   | 接收 GELLO Robot 协议请求，分派状态读取和七维控制命令              |
 | SDK/硬件层   | 由 `pyAgxArm` 通过 `can0` 与 PiPER-X 控制器和 AGX 夹爪通信 |
 
-### 文件结构
+### 3. 文件结构
 
 ```text
 agilexrobotics/
@@ -69,7 +69,7 @@ agilexrobotics/
     └── test_reader.py
 ```
 
-### 文件功能
+### 4. 文件功能
 
 | 文件                                   | 实现的功能                                                    |
 | ------------------------------------ | -------------------------------------------------------- |
@@ -91,7 +91,7 @@ agilexrobotics/
 | `tests/test_gello_follower.py`       | 验证七维 GELLO 协议、启停、夹爪正向映射和反馈缺失降级                           |
 | `tests/test_reader.py`               | 验证只读连接生命周期、反馈转换和 SDK 对象创建                                |
 
-## 1. 安装与 CAN 配置
+## （2）安装与 CAN 配置
 
 首次安装步骤见[项目 README](../README.md)。开发环境中可进入克隆得到的项目目录，并严格按照锁文件同步依赖：
 
@@ -126,7 +126,7 @@ uv sync --frozen
 uv run ag status
 ```
 
-## 2. `ag` 命令详解
+## （3）`ag` 命令详解
 
 基本格式：
 
@@ -136,11 +136,11 @@ uv run ag COMMAND [OPTIONS]
 
 所有命令都会以 JSON 输出结果。成功返回退出码 `0`；连接、反馈、参数或硬件操作失败返回 `1`；只读接口在等待时间内没有收到反馈时返回 `2`。
 
-### 2.1 参数解析
+### 1. 参数解析
 
 | 参数                        | 含义                        | 默认值          | 单位/范围                          |
 | ------------------------- | ------------------------- | ------------ | ------------------------------ |
-| `command`                 | 要执行的命令                    | 无，必填         | 见 2.2、2.3                      |
+| `command`                 | 要执行的命令                    | 无，必填         | 见本章第 2、3 节                  |
 | `--channel`               | SocketCAN 通道              | `can0`       | 有效 CAN 接口名                     |
 | `--interface`             | python-can 后端             | `socketcan`  | 后端名称                           |
 | `--firmware`              | 主控制器固件协议族                 | `default`    | `default/v183/v188/v189`       |
@@ -162,7 +162,7 @@ uv run ag COMMAND [OPTIONS]
 
 参数可以写在命令前后，但推荐统一写在命令后。以下“完整示例”会显式写出该命令真正使用的全部参数；没有可调参数的命令只保留一个推荐示例。
 
-### 2.2 Read command
+### 2. Read command
 
 Read command 只读取反馈或查询配置，不使能机械臂、不修改控制器配置，也不发送运动命令。其中 `status`、`joints` 和 `firmware` 使用轻量只读连接，其余命令通过 `PiperXDriver` 完成更完整的反馈校验。
 
@@ -186,7 +186,7 @@ Read command 只读取反馈或查询配置，不使能机械臂、不修改控�
 | `limits`          | 查询每个关节及末端当前运动限制               | `uv run ag limits`        | `uv run ag limits --channel can0 --interface socketcan --firmware default --wait 0.2 --timeout 1.0`   |
 | `ratings`         | 查询各关节的碰撞保护和助力等级               | `uv run ag ratings`       | `uv run ag ratings --channel can0 --interface socketcan --firmware default --wait 0.2 --timeout 1.0`  |
 
-### 2.3 Hardware command
+### 3. Hardware command
 
 Hardware command 使用带反馈校验和安全限制的 `PiperXDriver`。部分命令会使能机械臂、修改固件配置或产生真实运动，执行前必须确认机械臂周围没有人员和障碍物。
 
@@ -231,7 +231,7 @@ Hardware command 使用带反馈校验和安全限制的 `PiperXDriver`。部分
 
 `zero`、`movej` 和 `movejs` 会按最大关节角变化自动拆分路径点，每个路径点最多等待 10 秒，并要求目标误差不超过 `0.1°`。命令结束后只断开主机连接，不会自动失能机械臂。
 
-## 3. `ag-gello-server` 与 GELLO 跟随
+## （4）`ag-gello-server` 与 GELLO 跟随
 
 `ag-gello-server` 将 PiPER-X 暴露为 GELLO 的七自由度 ZMQ Robot：前六维是 J1～J6，第七维是归一化夹爪位置。夹爪约定为 `0=全闭`、`1=全开`，默认采用正向映射：
 
@@ -241,7 +241,7 @@ AGX width_m = GELLO gripper × 0.1
 
 夹爪反馈暂时缺失时，服务会沿用最近一次成功发送的夹爪命令，不会因此中止六轴跟随。客户端完成启动对齐时，会把 GELLO 当前第七维位置立即发送给服务端，因此连接成功后机械臂夹爪会先同步到 GELLO 夹爪的当前开合位置。持续跟随时，客户端只对 J1～J6 应用最高 `1.0 rad` 的单步保护，夹爪第七维直接透传，不参与六轴缩放；服务端使用 `move_js`，并保留 `1.0 rad` 的最终单步安全检查。
 
-### 3.1 服务端参数
+### 1. 服务端参数
 
 ```bash
 uv run ag-gello-server [OPTIONS]
@@ -283,11 +283,11 @@ uv run ag-gello-server \
   --configure-motion-limits
 ```
 
-### 3.2 主要函数
+### 2. 主要函数
 
 | 函数/类                                     | 功能                                                          |
 | ---------------------------------------- | ----------------------------------------------------------- |
-| `gello_server._parser()`                 | 解析 3.1 中的服务端参数                                              |
+| `gello_server._parser()`                 | 解析本章第 1 节中的服务端参数                                          |
 | `gello_server._dispatch()`               | 分派 GELLO 的自由度、关节状态、关节命令和观测请求                                |
 | `gello_server.main()`                    | 创建 PiPER-X 适配器和 ZMQ 服务，并处理 `SIGINT/SIGTERM` 退出              |
 | `GelloPiperXRobot.start()`               | 连接、配置限位、使能并读取七维状态；不发送速度或运动模式命令                              |
@@ -297,7 +297,7 @@ uv run ag-gello-server \
 
 ZMQ 协议使用 Python `pickle`，只能绑定并开放给可信客户端。
 
-### 3.3 两个终端的职责
+### 3. 两个终端的职责
 
 | 终端   | 所在项目             | 负责的设备和功能                                                  |
 | ---- | ---------------- | --------------------------------------------------------- |
@@ -306,7 +306,7 @@ ZMQ 协议使用 Python `pickle`，只能绑定并开放给可信客户端。
 
 同一时间不要启动第二个占用 `can0` 的机械臂程序，也不要让多个进程占用 GELLO 串口。
 
-### 3.4 使用流程
+### 4. 使用流程
 
 1. 固定 PiPER-X，确认 CAN 已配置，GELLO 串口设备已连接。
 
