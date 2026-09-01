@@ -12,7 +12,7 @@ from typing import Any
 import zmq
 
 from agilexrobotics.exceptions import PiperXError
-from agilexrobotics.gello_robot import GelloPiperXRobot
+from agilexrobotics.gello_follower import GelloPiperXRobot
 
 
 def _dispatch(robot: GelloPiperXRobot, request: dict[str, Any]) -> Any:

@@ -5,7 +5,7 @@ import pytest
 
 from agilexrobotics import cli
 from agilexrobotics.driver import ArmErrorFlags, PiperXState
-from agilexrobotics.piper_x import PiperXSnapshot
+from agilexrobotics.reader import PiperXSnapshot
 
 
 class FakeConnection:

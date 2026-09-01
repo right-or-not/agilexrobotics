@@ -5,7 +5,7 @@ import pytest
 
 from agilexrobotics.driver import ArmErrorFlags, PiperXState
 from agilexrobotics.exceptions import FeedbackError
-from agilexrobotics.gello_robot import GelloPiperXRobot
+from agilexrobotics.gello_follower import GelloPiperXRobot
 from agilexrobotics.gello_server import _dispatch, _parser
 
 
@@ -111,7 +111,7 @@ def test_gello_server_rejects_removed_speed_percent_option() -> None:
 
 
 def started_robot(monkeypatch) -> tuple[GelloPiperXRobot, FakeDriver]:
-    monkeypatch.setattr("agilexrobotics.gello_robot.time.sleep", lambda _: None)
+    monkeypatch.setattr("agilexrobotics.gello_follower.time.sleep", lambda _: None)
     driver = FakeDriver()
     robot = GelloPiperXRobot(driver=driver, startup_wait=0)
     robot.start()
@@ -132,7 +132,7 @@ def test_start_does_not_send_motion_or_speed_mode_commands(monkeypatch) -> None:
 
 
 def test_missing_gripper_feedback_does_not_block_start(monkeypatch) -> None:
-    monkeypatch.setattr("agilexrobotics.gello_robot.time.sleep", lambda _: None)
+    monkeypatch.setattr("agilexrobotics.gello_follower.time.sleep", lambda _: None)
     driver = FakeDriver()
     driver.gripper_feedback_available = False
     robot = GelloPiperXRobot(driver=driver, startup_wait=0)
@@ -149,7 +149,7 @@ def test_missing_gripper_feedback_does_not_block_start(monkeypatch) -> None:
 
 
 def test_motion_limit_configuration_is_explicit(monkeypatch) -> None:
-    monkeypatch.setattr("agilexrobotics.gello_robot.time.sleep", lambda _: None)
+    monkeypatch.setattr("agilexrobotics.gello_follower.time.sleep", lambda _: None)
     driver = FakeDriver()
     robot = GelloPiperXRobot(
         driver=driver, startup_wait=0, configure_motion_limits=True
@@ -174,9 +174,9 @@ def test_command_dispatch_is_rate_limited(monkeypatch) -> None:
     times = iter((10.0, 10.005, 10.02))
     sleeps: list[float] = []
     monkeypatch.setattr(
-        "agilexrobotics.gello_robot.time.monotonic", lambda: next(times)
+        "agilexrobotics.gello_follower.time.monotonic", lambda: next(times)
     )
-    monkeypatch.setattr("agilexrobotics.gello_robot.time.sleep", sleeps.append)
+    monkeypatch.setattr("agilexrobotics.gello_follower.time.sleep", sleeps.append)
     driver = FakeDriver()
     robot = GelloPiperXRobot(driver=driver, startup_wait=0, control_hz=50)
     robot.start()

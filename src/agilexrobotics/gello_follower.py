@@ -1,4 +1,4 @@
-"""GELLO Robot-protocol adapter for a six-axis PiPER-X."""
+"""GELLO follower adapter for a six-axis PiPER-X."""
 
 from __future__ import annotations
 

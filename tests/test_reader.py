@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from agilexrobotics.piper_x import PiperXConnection
+from agilexrobotics.reader import PiperXConnection
 
 
 @dataclass

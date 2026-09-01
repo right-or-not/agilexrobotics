@@ -17,7 +17,7 @@ from agilexrobotics.exceptions import (
     NotEnabledError,
     PiperXError,
 )
-from agilexrobotics.piper_x import Firmware, create_piper_x_arm
+from agilexrobotics.reader import Firmware, create_piper_x_arm
 
 # PiPER-X SDK 配置中的标称关节范围，单位为弧度。
 # 真实设备的零点反馈可能略微超出标称端点，因此实际校验时还会额外加入一个较小的标定余量

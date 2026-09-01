@@ -1,335 +1,175 @@
-> 基于官方 `pyAgxArm` SDK，为 PiPER-X 提供 `ag` 命令行控制工具，以及连接 GELLO 主手与 PiPER-X 从臂的 ZMQ 跟随服务。
->
-> 运行机械臂前请固定底座、清空工作空间，并确保急停按钮可以随时触及；执行失能操作前必须支撑机械臂。
+# agilexrobotics
 
-## 0. 项目基本信息
+`agilexrobotics` 是面向 AgileX PiPER-X 机械臂的 Python 控制项目，提供 SocketCAN 通信、状态读取、基础运动与夹爪控制，以及供 GELLO 遥操作程序调用的 ZMQ 服务。项目提供两个命令入口：`ag` 用于机械臂调试和控制，`ag-gello-server` 用于启动跟随 GELLO 控制服务。
 
-项目使用 Python 3.11 及以上版本，采用 `uv` 管理依赖和运行命令，并使用标准的 `src layout` 组织 Python 包。机械臂0通信基于 `pyAgxArm` 和 SocketCAN；GELLO 跟随服务使用 NumPy 处理七维状态，并通过 ZeroMQ 在两个进程之间传输请求和反馈。
+> **[!WARNING]** 
+> 
+> - 任何运动命令都可能造成机械臂、夹爪或周围物体损坏。首次使用前请固定机械臂底座、清空工作空间、确保急停按钮触手可及。建议先完成只读状态检查，再进行运动测试。
+> 
+> - 机械臂失能会导致机械臂从当前状态直接自由落体，可能对机械臂造成不可逆的影响。因此，建议失能前托住机械臂。
 
-### 命令入口
+## （1）环境要求
 
-| 命令 | Python 入口 | 功能 |
-| --- | --- | --- |
-| `uv run ag` | `agilexrobotics.cli:main` | 查询状态、配置参数，以及执行 PiPER-X 和 AGX 夹爪控制命令 |
-| `uv run ag-gello-server` | `agilexrobotics.gello_server:main` | 将 PiPER-X 封装为 GELLO 可访问的七自由度 ZMQ Robot 服务 |
+- Ubuntu 或其他支持 SocketCAN 的 Linux 系统
+- Python 3.11 或更高版本（当前项目使用 `.python-version` 固定为 3.11）
+- [Git](https://git-scm.com/) & [uv](https://docs.astral.sh/uv/getting-started/installation/)
+- `iproute2` 提供的 `ip` 命令
+- PiPER-X 机械臂、兼容的 USB-CAN 适配器和正确的 CAN 总线终端电阻
+- LInux 账户能够使用 `sudo` 配置网络接口
 
-### 项目架构
+## （2）快速开始
 
-项目按“入口与参数解析 → 协议适配 → 安全驱动 → 官方 SDK → 硬件”分层。三条主要调用链如下：
+### 1. 安装系统工具
 
-```text
-Read command
-ag → cli.py → piper_x.py → pyAgxArm → SocketCAN → PiPER-X
-
-Hardware command
-ag → cli.py → driver.py → pyAgxArm → SocketCAN → PiPER-X / AGX 夹爪
-
-GELLO 跟随
-GELLO 主手 → piper_x_follow.py → ZMQ → gello_server.py
-           → gello_robot.py → driver.py → pyAgxArm → PiPER-X / AGX 夹爪
-```
-
-各层职责：
-
-| 层级 | 负责内容 |
-| --- | --- |
-| CLI 层 | 解析参数、区分 Read/Hardware command、校验命令参数并输出 JSON |
-| 只读连接层 | 创建 SDK 对象、管理连接生命周期并整理基础反馈，不使能机械臂 |
-| 安全驱动层 | 检查连接、反馈时效、机械臂错误、使能状态、关节范围和单步跨度 |
-| GELLO 适配层 | 在 GELLO 七维状态与 PiPER-X 六轴加 AGX 夹爪之间进行转换 |
-| ZMQ 服务层 | 接收 GELLO Robot 协议请求，分派状态读取和七维控制命令 |
-| SDK/硬件层 | 由 `pyAgxArm` 通过 `can0` 与 PiPER-X 控制器和 AGX 夹爪通信 |
-
-### 文件结构
-
-```text
-agilexrobotics/
-├── CLAUDE.md
-├── pyproject.toml
-├── uv.lock
-├── README.md
-├── scripts/
-│   └── config_can.sh
-├── src/agilexrobotics/
-│   ├── __init__.py
-│   ├── cli.py
-│   ├── driver.py
-│   ├── exceptions.py
-│   ├── gello_robot.py
-│   ├── gello_server.py
-│   └── piper_x.py
-└── tests/
-    ├── test_cli.py
-    ├── test_driver.py
-    ├── test_gello_robot.py
-    └── test_piper_x.py
-```
-
-### 文件功能
-
-| 文件 | 实现的功能 |
-| --- | --- |
-| `CLAUDE.md` | 保存本地开发协作说明，不参与安装、运行或硬件控制 |
-| `pyproject.toml` | 定义项目元数据、Python 版本、依赖、开发工具，以及 `ag`、`ag-gello-server` 命令入口 |
-| `uv.lock` | 锁定直接和间接依赖版本，供 `uv sync` 创建可复现环境 |
-| `scripts/config_can.sh` | 检查接口与权限，并完成 SocketCAN 接口关闭、波特率设置、启动和状态输出 |
-| `src/agilexrobotics/__init__.py` | 标记 `agilexrobotics` Python 包；当前不额外导出公共对象 |
-| `src/agilexrobotics/cli.py` | 定义全部 `ag` 参数和命令；按常用/不常用、Read/Hardware 分类分派并输出结果 |
-| `src/agilexrobotics/piper_x.py` | 提供轻量只读连接；读取固件、关节、末端位姿和综合快照 |
-| `src/agilexrobotics/driver.py` | 提供带安全校验的状态、使能、运动、配置、错误恢复和 AGX 夹爪控制 |
-| `src/agilexrobotics/exceptions.py` | 定义通信、反馈、机械臂状态、未使能和关节命令等项目异常 |
-| `src/agilexrobotics/gello_robot.py` | 实现 GELLO Robot 适配器；组合六轴与夹爪状态，并正向映射夹爪开口 |
-| `src/agilexrobotics/gello_server.py` | 建立 ZMQ REP 服务，分派 GELLO 请求，并负责启动和关闭 PiPER-X 适配器 |
-| `tests/test_cli.py` | 验证参数、别名、命令分派、返回结果和运动控制路径 |
-| `tests/test_driver.py` | 验证连接、反馈、安全限制、使能、运动、配置和夹爪对象复用 |
-| `tests/test_gello_robot.py` | 验证七维 GELLO 协议、启停、夹爪正向映射和反馈缺失降级 |
-| `tests/test_piper_x.py` | 验证只读连接生命周期、反馈转换和 SDK 对象创建 |
-
-## 1. 安装与 CAN 配置
-
-进入项目目录后安装依赖：
+在 Ubuntu 上安装 Git、uv 安装脚本所需的 curl，以及配置 SocketCAN 所需的 iproute2：
 
 ```bash
-cd ~/projects/agilexrobotics
-uv sync
+sudo apt update
+sudo apt install -y git curl iproute2
 ```
 
-配置默认 CAN 接口 `can0`，波特率为 `1,000,000 bit/s`：
+### 2. 获取项目
+
+使用 SSH clone 项目：
 
 ```bash
-sudo ./scripts/config_can.sh
+git clone git@github.com:right-or-not/agilexrobotics.git
+cd agilexrobotics
 ```
 
-脚本会依次关闭接口、设置 CAN 波特率、重新启用接口并输出接口状态。普通用户执行时会自动使用 `sudo`。脚本没有设置 `restart-ms`，因此也兼容不支持 Bus-Off 自动重启的 CAN 设备。
-
-需要使用其他接口或波特率时，可传入两个位置参数：
+未配置 GitHub SSH 密钥时可使用 HTTPS：
 
 ```bash
-sudo ./scripts/config_can.sh can1 500000
+git clone https://github.com/right-or-not/agilexrobotics.git
+cd agilexrobotics
 ```
 
-| 位置参数 | 含义 | 默认值 | 取值要求 |
-| --- | --- | --- | --- |
-| `INTERFACE` | CAN 网络接口名 | `can0` | 接口必须真实存在 |
-| `BITRATE` | CAN 波特率 | `1000000 bit/s` | 正整数 |
+### 3. 安装 uv 和项目依赖
 
-配置完成后可用以下命令验证机械臂反馈：
+如果系统尚未安装 uv，可使用官方安装脚本：
+
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh
+source "$HOME/.local/bin/env"
+```
+
+若安装程序提示了不同的环境加载命令，请以终端提示为准；其他安装方式见 [uv 官方安装说明](https://docs.astral.sh/uv/getting-started/installation/)。安装完成后确认命令可用：
+
+```bash
+uv --version
+```
+
+安装项目要求的 Python，并根据 `uv.lock` 创建本地 `.venv`、同步依赖：
+
+```bash
+uv python install 3.11
+uv sync --frozen
+```
+
+通常不需要手动激活虚拟环境；后续使用 `uv run ...` 时，uv 会自动使用当前项目的 `.venv`。如需在编辑器或终端中显式激活，可执行：
+
+```bash
+source .venv/bin/activate
+```
+
+### 4. 连接并配置 CAN
+
+连接 USB-CAN 和 PiPER-X，给机械臂上电并释放急停。先确认系统已经创建 CAN 网络接口：
+
+```bash
+ip -brief link show can0
+```
+
+将 `can0` 配置为 PiPER-X 使用的 1 Mbit/s，并显示接口统计信息：
+
+```bash
+./scripts/config_can.sh
+```
+
+脚本会在必要时调用 `sudo`，并可安全地重复执行。默认参数依次为接口名（`interface`）、波特率（`bitrate`）和发送队列长度（`txqueuelen`）；使用其他配置时可显式传入：
+
+```bash
+./scripts/config_can.sh can0 1000000 100
+```
+
+再次检查接口状态：
+
+```bash
+ip -details -statistics link show can0
+```
+
+### 5. 进行只读连通性验证
+
+先读取综合状态，该命令不会使能或移动机械臂：
 
 ```bash
 uv run ag status
 ```
 
-## 2. `ag` 命令详解
-
-基本格式：
+正常通信时，输出中的 `connected` 和 `communication_ok` 应为 `true`。继续检查关节角和固件信息：
 
 ```bash
-uv run ag COMMAND [OPTIONS]
+uv run ag joints
+uv run ag firmware
 ```
 
-所有命令都会以 JSON 输出结果。成功返回退出码 `0`；连接、反馈、参数或硬件操作失败返回 `1`；只读接口在等待时间内没有收到反馈时返回 `2`。
+如果 `connected` 为 `true` 但 `communication_ok` 为 `false`，通常表示软件已打开 CAN 接口但尚未收到完整反馈；请检查机械臂电源、急停、CAN-H/CAN-L 接线、终端电阻和波特率，并观察 `ip -statistics link show can0` 中的 RX 计数是否增长。
 
-### 2.1 参数解析
+至此，Python 环境、项目依赖和 PiPER-X 只读通信均已完成。运行任何运动命令前，请阅读[开发与调试手册](docs/DEVELOPMENT.md)中的安全说明和命令参数。
 
-| 参数 | 含义 | 默认值 | 单位/范围 |
-| --- | --- | --- | --- |
-| `command` | 要执行的命令 | 无，必填 | 见 2.2、2.3 |
-| `--channel` | SocketCAN 通道 | `can0` | 有效 CAN 接口名 |
-| `--interface` | python-can 后端 | `socketcan` | 后端名称 |
-| `--firmware` | 主控制器固件协议族 | `default` | `default/v183/v188/v189` |
-| `--wait` | 连接后等待首批周期反馈的时间 | `0.2` | 秒，≥ 0 |
-| `--timeout` | 查询或标定反馈的最长等待时间 | `1.0` | 秒，≥ 0 |
-| `--speed-percent` | 规划运动速度百分比 | `20` | `%`，整数 1～100 |
-| `--joint` | 指定单个关节 | 全部或未指定 | J1～J6，对应整数 1～6 |
-| `--delta-deg` | 单关节相对转动量 | 无，使用时必填 | 度，非 0，范围 −90～90 |
-| `--joints` | J1～J6 的绝对目标角 | 无，使用时必填 | 6 个有限数，单位 rad |
-| `--pose` | `X Y Z Roll Pitch Yaw` 位姿 | 无，使用时必填 | XYZ：m；RPY：rad |
-| `--mid` | 圆弧途经点位姿 | 无，使用时必填 | 6 个数，单位同 `--pose` |
-| `--end` | 圆弧终点位姿 | 无，使用时必填 | 6 个数，单位同 `--pose` |
-| `--rating` | 碰撞保护或助力等级 | 省略时只查询 | `protect`：0～8<br>`assist`：0～10 |
-| `--width` | AGX 夹爪目标开口宽度 | 无，使用时必填 | m，非负有限数 |
-| `--force` | AGX 夹爪目标夹持力 | `1.0` | N，非负有限数 |
-| `--payload` | 末端负载档位 | `empty` | `empty/half/full` |
-| `--position` | 底座安装方向 | `horizontal` | `horizontal/left/right` |
-| `--confirm-hardware-test` | 旧版脚本兼容开关 | `False` | 无实际控制作用 |
+## （3）GELLO 服务
 
-参数可以写在命令前后，但推荐统一写在命令后。以下“完整示例”会显式写出该命令真正使用的全部参数；没有可调参数的命令只保留一个推荐示例。
-
-### 2.2 Read command
-
-Read command 使用轻量只读连接，不使能机械臂，也不发送运动命令。
-
-#### 常用指令
-
-| 命令 | 功能 | 最简示例 | 完整示例 |
-| --- | --- | --- | --- |
-| `status` | 汇总连接、通信、FPS、固件、六轴角度、末端位姿和控制器状态 | `uv run ag status` | `uv run ag status --channel can0 --interface socketcan --firmware default --wait 0.2 --timeout 1.0` |
-| `joints` | 读取 J1～J6 当前反馈角度，单位 rad | `uv run ag joints` | `uv run ag joints --channel can0 --interface socketcan --firmware default --wait 0.2` |
-
-#### 不常用指令
-
-| 命令 | 功能 | 最简示例 | 完整示例 |
-| --- | --- | --- | --- |
-| `firmware` / `fw` | 查询主控制器固件信息 | `uv run ag firmware` | `uv run ag firmware --channel can0 --interface socketcan --firmware default --wait 0.2 --timeout 1.0` |
-
-### 2.3 Hardware command
-
-Hardware command 使用带反馈校验和安全限制的 `PiperXDriver`。部分命令会使能机械臂、修改固件配置或产生真实运动，执行前必须确认机械臂周围没有人员和障碍物。
-
-表格中的“SDK”表示该 `ag` 命令最终调用的底层 pyAgxArm 运动接口；用户执行时必须使用第一行显示的 `ag` 命令名。
-
-#### 常用指令
-
-| `ag` 命令 / SDK 方法 | 功能 | 最简示例 | 完整示例 |
-| --- | --- | --- | --- |
-| `enable` / `on` <br>SDK：`enable` | 使能 J1～J6，使机械臂可以接收运动命令；不会额外发送位置目标 | `uv run ag enable` | `uv run ag enable --channel can0 --interface socketcan --firmware default --wait 0.2 --speed-percent 20` |
-| `disable` / `off` <br/>SDK：`disable` | 失能 J1～J6；机械臂可能因重力下坠 | `uv run ag disable` | `uv run ag disable --channel can0 --interface socketcan --firmware default --wait 0.2` |
-| `stop` <br/>SDK：`electronic_emergency_stop` | 发送带阻尼电子急停并撤销驱动的已使能记录；不是物理断电 | `uv run ag stop` | `uv run ag stop --channel can0 --interface socketcan --firmware default --wait 0.2` |
-| `reset` <br/>SDK：`reset` | 恢复控制器运动状态；不是断电重启、恢复出厂或机械臂回零 | `uv run ag reset` | `uv run ag reset --channel can0 --interface socketcan --firmware default --wait 0.2` |
-| `movej` <br/>SDK：`move_j` | 以普通关节模式移动到六轴绝对目标，并逐段等待到位 | `uv run ag movej --joints 0 0 0 0 0 0` | `uv run ag movej --joints 0 0 0 0 0 0 --channel can0 --interface socketcan --firmware default --wait 0.2 --speed-percent 20` |
-| `movejs` <br/>SDK：`move_js` | 以高响应、无平滑规划模式持续刷新六轴绝对目标直到到位，可能产生冲击 | `uv run ag movejs --joints 0 0 0 0 0 0` | `uv run ag movejs --joints 0 0 0 0 0 0 --channel can0 --interface socketcan --firmware default --wait 0.2 --speed-percent 20` |
-| `movep` <br/>SDK：`move_p` | 使用 P 模式移动到指定末端位姿 | `uv run ag movep --pose 0.20 0 0.30 0 1.57 0` | `uv run ag movep --pose 0.20 0 0.30 0 1.57 0 --channel can0 --interface socketcan --firmware default --wait 0.2 --speed-percent 20` |
-| `movel` <br/>SDK：`move_l` | 使用直线 L 模式移动到指定末端位姿 | `uv run ag movel --pose 0.20 0 0.30 0 1.57 0` | `uv run ag movel --pose 0.20 0 0.30 0 1.57 0 --channel can0 --interface socketcan --firmware default --wait 0.2 --speed-percent 20` |
-| `movec` <br/>SDK：`move_c` | 按起点、途经点和终点执行末端圆弧运动 | `uv run ag movec --pose 0.20 0 0.30 0 1.57 0 --mid 0.20 0.05 0.35 0 1.57 0 --end 0.20 0 0.40 0 1.57 0` | `uv run ag movec --pose 0.20 0 0.30 0 1.57 0 --mid 0.20 0.05 0.35 0 1.57 0 --end 0.20 0 0.40 0 1.57 0 --channel can0 --interface socketcan --firmware default --wait 0.2 --speed-percent 20` |
-
-> **当前未实现：** pyAgxArm 的单关节 MIT 控制方法 `move_mit` 尚未封装到
-> `PiperXDriver` 和 `ag` CLI，因此目前不能执行 `uv run ag move_mit`。如需将它
-> 作为常用指令，必须先补充驱动方法、CLI 参数与安全校验。
-
-#### 不常用指令
-
-| 命令 | 功能 | 最简示例 | 完整示例 |
-| --- | --- | --- | --- |
-| `driver-status` | 读取经过通信、格式、时效和错误检查的完整状态 | `uv run ag driver-status` | `uv run ag driver-status --channel can0 --interface socketcan --firmware default --wait 0.2` |
-| `motor-status` | 读取六轴整体状态，以及逐电机的位置、电流、温度、电压和故障 | `uv run ag motor-status` | `uv run ag motor-status --channel can0 --interface socketcan --firmware default --wait 0.2` |
-| `pose` | 读取法兰末端六维位姿和六轴角度 | `uv run ag pose` | `uv run ag pose --channel can0 --interface socketcan --firmware default --wait 0.2` |
-| `fps` | 查看 SDK 接收 CAN 周期反馈的频率，单位 Hz | `uv run ag fps` | `uv run ag fps --channel can0 --interface socketcan --firmware default --wait 0.2` |
-| `limits` | 查询每个关节及末端当前运动限制 | `uv run ag limits` | `uv run ag limits --channel can0 --interface socketcan --firmware default --wait 0.2 --timeout 1.0` |
-| `ratings` | 查询各关节的碰撞保护和助力等级 | `uv run ag ratings` | `uv run ag ratings --channel can0 --interface socketcan --firmware default --wait 0.2 --timeout 1.0` |
-| `hold` | 使能后把当前实测六轴位置设为目标，保持当前位置 | `uv run ag hold` | `uv run ag hold --channel can0 --interface socketcan --firmware default --wait 0.2 --speed-percent 20` |
-| `zero` | 将 J1～J6 移动到当前坐标系的 `0 rad`；不会重新标定零点 | `uv run ag zero` | `uv run ag zero --channel can0 --interface socketcan --firmware default --wait 0.2 --speed-percent 20` |
-| `move-joint` | 让指定关节相对当前位置转动一次，其余关节保持当前目标 | `uv run ag move-joint --joint 1 --delta-deg 5` | `uv run ag move-joint --joint 1 --delta-deg 5 --channel can0 --interface socketcan --firmware default --wait 0.2 --speed-percent 20` |
-| `clear` | 清除指定关节错误；省略 `--joint` 时清除全部关节错误 | `uv run ag clear` | `uv run ag clear --joint 1 --channel can0 --interface socketcan --firmware default --wait 0.2` |
-| `max-limits` | 将 J1～J6 限值写为 `3.0 rad/s` 和 `5.0 rad/s²`，并要求固件确认 | `uv run ag max-limits` | `uv run ag max-limits --channel can0 --interface socketcan --firmware default --wait 0.2` |
-| `defaults` | 只恢复关节角度、速度和加速度默认限制，不恢复全部出厂参数 | `uv run ag defaults` | `uv run ag defaults --channel can0 --interface socketcan --firmware default --wait 0.2` |
-| `speed` | 单独写入后续规划运动使用的速度百分比 | `uv run ag speed` | `uv run ag speed --speed-percent 20 --channel can0 --interface socketcan --firmware default --wait 0.2` |
-| `payload` | 设置控制器使用的末端负载档位 | `uv run ag payload` | `uv run ag payload --payload full --channel can0 --interface socketcan --firmware default --wait 0.2` |
-| `install` | 设置机械臂底座的实际安装方向 | `uv run ag install` | `uv run ag install --position right --channel can0 --interface socketcan --firmware default --wait 0.2` |
-| `protect` | 不带 `--rating` 时查询等级；带参数时设置单轴或全部关节碰撞保护等级 | `uv run ag protect` | 查询：`uv run ag protect --channel can0 --interface socketcan --firmware default --wait 0.2 --timeout 1.0` 设置：`uv run ag protect --joint 1 --rating 8 --channel can0 --interface socketcan --firmware default --wait 0.2` |
-| `assist` | 不带 `--rating` 时查询等级；带参数时设置单轴或全部关节助力等级 | `uv run ag assist` | 查询：`uv run ag assist --channel can0 --interface socketcan --firmware default --wait 0.2 --timeout 1.0` 设置：`uv run ag assist --joint 1 --rating 10 --channel can0 --interface socketcan --firmware default --wait 0.2` |
-| `grip-status` | 读取 AGX 夹爪开口、力、模式、使能、回零和错误状态 | `uv run ag grip-status` | `uv run ag grip-status --channel can0 --interface socketcan --firmware default --wait 0.2` |
-| `grip` | 将 AGX 夹爪移动到指定开口宽度并设置夹持力 | `uv run ag grip --width 0.035` | `uv run ag grip --width 0.035 --force 1.0 --channel can0 --interface socketcan --firmware default --wait 0.2` |
-| `grip-reset` | 复位 AGX 夹爪控制器；不会复位六轴或标定夹爪零点 | `uv run ag grip-reset` | `uv run ag grip-reset --channel can0 --interface socketcan --firmware default --wait 0.2` |
-| `grip-zero` | 把 AGX 夹爪当前位置标定为零点，并等待夹爪确认 | `uv run ag grip-zero` | `uv run ag grip-zero --timeout 1.0 --channel can0 --interface socketcan --firmware default --wait 0.2` |
-
-`zero`、`movej` 和 `movejs` 会按最大关节角变化自动拆分路径点，每个路径点最多等待 10 秒，并要求目标误差不超过 `0.1°`。命令结束后只断开主机连接，不会自动失能机械臂。
-
-## 3. `ag-gello-server` 与 GELLO 跟随
-
-`ag-gello-server` 将 PiPER-X 暴露为 GELLO 的七自由度 ZMQ Robot：前六维是 J1～J6，第七维是归一化夹爪位置。夹爪约定为 `0=全闭`、`1=全开`，默认采用正向映射：
-
-```text
-AGX width_m = GELLO gripper × 0.1
-```
-
-夹爪反馈暂时缺失时，服务会沿用最近一次成功发送的夹爪命令，不会因此中止六轴跟随。客户端完成启动对齐时，会把 GELLO 当前第七维位置立即发送给服务端，因此连接成功后机械臂夹爪会先同步到 GELLO 夹爪的当前开合位置。持续跟随时，客户端只对 J1～J6 应用最高 `1.0 rad` 的单步保护，夹爪第七维直接透传，不参与六轴缩放；服务端使用 `move_js`，并保留 `1.0 rad` 的最终单步安全检查。
-
-### 3.1 服务端参数
+完成 CAN 连通性验证后，可启动供 GELLO 客户端连接的本地 ZMQ 服务：
 
 ```bash
-uv run ag-gello-server [OPTIONS]
+uv run ag-gello-server --host 127.0.0.1 --port 6001 --hz 50
 ```
 
-| 参数 | 含义 | 默认值 | 单位/范围 |
-| --- | --- | --- | --- |
-| `--channel` | PiPER-X CAN 通道 | `can0` | 有效 CAN 接口名 |
-| `--interface` | python-can 后端 | `socketcan` | 后端名称 |
-| `--firmware` | 主控制器固件协议族 | `default` | 固件名称 |
-| `--host` | ZMQ 监听地址 | `127.0.0.1` | IP 或主机名 |
-| `--port` | ZMQ 监听端口 | `6001` | 整数端口 |
-| `--gripper-max-width-m` | AGX 夹爪全开宽度 | `0.1` | m，正有限数 |
-| `--gripper-force-n` | 跟随时使用的夹持力 | `1.0` | N，非负有限数 |
-| `--configure-motion-limits` / `--no-configure-motion-limits` | 是否在启动时写入最大速度和加速度限制 | 开启 | 默认写入 `3.0 rad/s`、`5.0 rad/s²`；固件不支持时可关闭 |
-| `--confirm-hardware-control` | 旧版兼容参数 | 关闭 | 无实际控制作用 |
+`--hz` 限制 PiPER-X 关节命令的最大发送频率，默认值为 50 Hz。启动服务会进入硬件控制流程；完整的双终端连接步骤、参数含义和退出方式请参阅[开发与调试手册](docs/DEVELOPMENT.md#3-ag-gello-server-与-gello-跟随)。
 
-服务端启动时不会立即进入 JS 模式；收到客户端第一帧跟随目标时，才建立 `move_js` 流式会话并设置一次运动模式，后续直接高频刷新目标。验证结果表明默认六轴符号为 `1 1 -1 -1 1 1`，其中 J3 和 J4 使用反向映射。服务端不提供也不写入 `--speed-percent`；JS 跟随速度由 GELLO 指令频率、目标变化量以及机械臂固件的最大速度和加速度决定。启动阶段也不发送普通 `move_j` 保持命令，以免重启服务时把仍处于 JS 模式的控制器切换到普通 J 模式。
+## （4）开发环境
 
-推荐使用默认配置：
+`uv sync --frozen` 会同步锁文件中声明的开发依赖。常用质量检查命令如下：
 
 ```bash
-uv run ag-gello-server
+uv run pytest
+uv run ruff check .
+uv run pyright
 ```
 
-需要显式配置全部有效参数时：
+项目架构、源码职责、CLI 全部参数、硬件调试和 GELLO 联调方法统一记录在[开发与调试手册](docs/DEVELOPMENT.md)中。
+
+## （5）常见问题
+
+### 1. `uv sync` 无法拉取 `pyagxarm`
+
+`pyagxarm` 依赖通过 GitHub Git 仓库安装。请确认当前网络能够访问 GitHub，并且系统已安装 Git，然后重新执行：
 
 ```bash
-uv run ag-gello-server \
-  --channel can0 \
-  --interface socketcan \
-  --firmware default \
-  --host 127.0.0.1 \
-  --port 6001 \
-  --gripper-max-width-m 0.1 \
-  --gripper-force-n 1.0 \
-  --configure-motion-limits
+uv sync --frozen
 ```
 
-### 3.2 主要函数
+### 2. 找不到 `can0`
 
-| 函数/类 | 功能 |
-| --- | --- |
-| `gello_server._parser()` | 解析 3.1 中的服务端参数 |
-| `gello_server._dispatch()` | 分派 GELLO 的自由度、关节状态、关节命令和观测请求 |
-| `gello_server.main()` | 创建 PiPER-X 适配器和 ZMQ 服务，并处理 `SIGINT/SIGTERM` 退出 |
-| `GelloPiperXRobot.start()` | 连接、配置限位、使能并读取七维状态；不发送速度或运动模式命令 |
-| `GelloPiperXRobot.get_observations()` | 返回七维关节状态/速度、末端位姿和夹爪位置 |
-| `GelloPiperXRobot.command_joint_state()` | 前六维使用 `move_js` 流式发送给 PiPER-X；第七维独立正向映射到 AGX 夹爪 |
-| `GelloPiperXRobot.close()` | 断开 CAN；默认不会主动失能机械臂 |
+先确认 USB-CAN 已被系统识别：
 
-ZMQ 协议使用 Python `pickle`，只能绑定并开放给可信客户端。
+```bash
+lsusb
+ip -brief link show
+```
 
-### 3.3 两个终端的职责
+若适配器使用 `gs_usb` 驱动，可尝试加载驱动后重新插拔设备：
 
-| 终端 | 所在项目 | 负责的设备和功能 |
-| --- | --- | --- |
-| 终端 1 | `agilexrobotics` | 独占 PiPER-X 的 CAN 连接；使能从臂并提供 `tcp://127.0.0.1:6001` ZMQ 服务 |
-| 终端 2 | `gello_software` | 独占 GELLO 的 FTDI/Dynamixel 串口；读取主手并把七维目标发送给终端 1 |
+```bash
+sudo modprobe gs_usb
+```
 
-同一时间不要启动第二个占用 `can0` 的机械臂程序，也不要让多个进程占用 GELLO 串口。
+### 3. CAN 接口是 UP，但收不到反馈
 
-### 3.4 使用流程
+接口处于 `UP` 仅表示本机 SocketCAN 已配置完成，不代表机械臂已经发送数据。使用以下命令观察 RX/TX 和 CAN 错误计数，同时检查机械臂供电、急停、接线、终端电阻及 1 Mbit/s 波特率：
 
-1. 固定 PiPER-X，确认 CAN 已配置，GELLO 串口设备已连接。
-2. 在终端 1 启动 PiPER-X 服务端：
+```bash
+ip -details -statistics link show can0
+```
 
-   ```bash
-   cd ~/projects/agilexrobotics
-   uv run ag-gello-server
-   ```
-
-   出现以下信息后再启动终端 2：
-
-   ```text
-   PiPER-X GELLO server listening on tcp://127.0.0.1:6001
-   ```
-
-3. 在终端 2 启动 GELLO 主手客户端：
-
-   ```bash
-   cd ~/projects/gello_software
-   .venv/bin/python experiments/piper_x_follow.py \
-     --gello-port /dev/serial/by-id/usb-FTDI_USB__-__Serial_Converter_FTBM4Z46-if00-port0 \
-     --start-joints 0 0 0 0 0 0
-   ```
-
-   `--start-joints` 提供六个用于 Dynamixel 多圈角度对齐的参考值；如果当前机械臂不在零位，可先执行 `uv run ag joints`，把返回的 J1～J6 弧度值填入该参数。客户端会使用启动时的相对姿态对齐，保留 GELLO 第七维夹爪命令，并限制单次目标变化。
-
-4. 看到以下输出后才表示跟随循环已经启动：
-
-   ```text
-   GELLO and PiPER-X aligned; teleoperation started (Ctrl-C to stop)
-   ```
-
-5. 停止时先在终端 2 按 `Ctrl-C` 停止主手命令，再在终端 1 按 `Ctrl-C` 关闭 ZMQ/CAN 服务。服务默认只断开连接而不失能机械臂；如需失能，请支撑机械臂后执行 `uv run ag disable`。
-
-若 GELLO 偶尔打印 `warning, comm failed: -3001`，表示 Dynamixel 状态包接收超时。偶发一次会跳过当前帧并继续运行；持续出现时应检查 FTDI/串联线、供电、USB Hub 和串口是否被其他进程占用。
+更多诊断方法见[开发与调试手册](docs/DEVELOPMENT.md)。

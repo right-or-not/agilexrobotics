@@ -12,7 +12,7 @@ from typing import Any
 
 from agilexrobotics.driver import PiperXDriver
 from agilexrobotics.exceptions import PiperXError
-from agilexrobotics.piper_x import PiperXConnection
+from agilexrobotics.reader import PiperXConnection
 
 # 命令顺序与 README 保持一致：常用命令放在前面，便于帮助信息和源码检索。
 _COMMON_READ_COMMANDS = ("status", "joints")
