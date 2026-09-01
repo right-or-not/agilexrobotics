@@ -6,7 +6,7 @@
 
 ## （1）项目基本信息
 
-项目使用 Python 3.11 及以上版本，采用 `uv` 管理依赖和运行命令，并使用标准的 `src layout` 组织 Python 包。机械臂通信基于 `pyAgxArm` 和 SocketCAN；GELLO 跟随服务使用 NumPy 处理七维状态，并通过 ZeroMQ 在两个进程之间传输请求和反馈。
+项目使用 Python 3.11 及以上版本，采用 pyenv 安装和选择 Python，采用 uv 创建 `.venv`、管理依赖和运行命令，并使用标准的 `src layout` 组织 Python 包。机械臂通信基于 `pyAgxArm` 和 SocketCAN；GELLO 跟随服务使用 NumPy 处理七维状态，并通过 ZeroMQ 在两个进程之间传输请求和反馈。
 
 ### 1. 命令入口
 
@@ -93,11 +93,15 @@ agilexrobotics/
 
 ## （2）安装与 CAN 配置
 
-首次安装步骤见[项目 README](../README.md)。开发环境中可进入克隆得到的项目目录，并严格按照锁文件同步依赖：
+首次安装步骤见[项目 README](../README.md)。开发环境中读取 `.python-version`，由 pyenv 准备解释器，再将其显式交给 uv：
 
 ```bash
 cd agilexrobotics
-uv sync --frozen
+requested_version="$(<.python-version)"
+resolved_version="$(pyenv latest -k "$requested_version")"
+pyenv install -s "$resolved_version"
+interpreter="$(PYENV_VERSION="$resolved_version" pyenv which python)"
+UV_NO_MANAGED_PYTHON=1 uv sync --frozen --python "$interpreter"
 ```
 
 配置默认 CAN 接口 `can0`，波特率为 `1,000,000 bit/s`：

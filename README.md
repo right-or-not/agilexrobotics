@@ -44,7 +44,7 @@ git clone https://github.com/right-or-not/agilexrobotics.git
 cd agilexrobotics
 ```
 
-### 3. 安装 uv 和项目依赖
+### 3. 安装 pyenv、uv 和项目依赖
 
 如果系统尚未安装 uv，可使用官方安装脚本：
 
@@ -59,14 +59,17 @@ source "$HOME/.local/bin/env"
 uv --version
 ```
 
-安装项目要求的 Python，并根据 `uv.lock` 创建本地 `.venv`、同步依赖：
+Python 由 pyenv 安装和选择，uv 只负责创建 `.venv`、同步 `uv.lock` 和运行命令。若尚未安装 pyenv，请先按[pyenv 官方说明](https://github.com/pyenv/pyenv#installation)完成安装。项目的 `.python-version` 声明 Python 3.11；解析并安装当前 pyenv 支持的最新 3.11 补丁版本：
 
 ```bash
-uv python install 3.11
-uv sync --frozen
+requested_version="$(<.python-version)"
+resolved_version="$(pyenv latest -k "$requested_version")"
+pyenv install -s "$resolved_version"
+interpreter="$(PYENV_VERSION="$resolved_version" pyenv which python)"
+UV_NO_MANAGED_PYTHON=1 uv sync --frozen --python "$interpreter"
 ```
 
-通常不需要手动激活虚拟环境；后续使用 `uv run ...` 时，uv 会自动使用当前项目的 `.venv`。如需在编辑器或终端中显式激活，可执行：
+显式的 `--python` 和 `UV_NO_MANAGED_PYTHON=1` 可以防止 uv 自行下载另一套 Python。通常不需要手动激活虚拟环境；后续使用 `uv run ...` 时，uv 会自动使用当前项目的 `.venv`。如需在编辑器或终端中显式激活，可执行：
 
 ```bash
 source .venv/bin/activate
